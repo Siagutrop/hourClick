@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  couchdb:
+    image: couchdb:3.4.2
+    container_name: hourclick-couchdb
+    restart: unless-stopped
+    ports:
+      - "5984:5984"
+    env_file:
+      - .env
+    environment:
+      - COUCHDB_USER=${COUCHDB_USER}
+      - COUCHDB_PASSWORD=${COUCHDB_PASSWORD}
+      - COUCHDB_SECRET=${COUCHDB_SECRET}
+    volumes:
+      - couchdb_data:/opt/couchdb/data
+      - ./couchdb/local.ini:/opt/couchdb/etc/local.ini
+    networks:
+      - hourclick-network
+
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile.prod
+    container_name: hourclick-app
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - couchdb
+    networks:
+      - hourclick-network
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: hourclick-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    networks:
+      - hourclick-network
+
+volumes:
+  couchdb_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  hourclick-network:
