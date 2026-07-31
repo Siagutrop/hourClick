@@ -1,0 +1,7 @@
+{
+  email {$HOURCLICK_EMAIL:admin@example.com}
+}
+
+{$HOURCLICK_HOST:localhost} {
+  reverse_proxy app:80
+}

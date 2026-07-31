@@ -39,6 +39,11 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    env_file:
+      - .env
+    environment:
+      - HOURCLICK_HOST=${HOURCLICK_HOST:-localhost}
+      - HOURCLICK_EMAIL=${HOURCLICK_EMAIL:-admin@example.com}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
