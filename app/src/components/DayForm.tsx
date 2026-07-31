@@ -243,7 +243,7 @@ export function DayForm() {
           >
             ‹
           </button>
-          {[-2, -1, 0, 1, 2].map((offset) => {
+          {[-1, 0, 1].map((offset) => {
             const d = addDays(new Date(date), offset)
             const dStr = d.toISOString().split('T')[0]
             return (
