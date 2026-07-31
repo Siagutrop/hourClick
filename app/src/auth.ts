@@ -6,9 +6,23 @@ interface User {
 const USERS_KEY = 'hourclick_users'
 const CURRENT_USER_KEY = 'hourclick_current_user'
 
+function simpleHash(pin: string) {
+  let hash = 0
+  for (let i = 0; i < pin.length; i++) {
+    const c = pin.charCodeAt(i)
+    hash = (hash << 5) - hash + c
+    hash |= 0
+  }
+  return 's:' + Math.abs(hash).toString(16)
+}
+
 export async function hashPassword(pin: string) {
+  const subtle = typeof crypto !== 'undefined' ? crypto.subtle : undefined
+  if (!subtle?.digest) {
+    return simpleHash(pin)
+  }
   const buf = new TextEncoder().encode(pin)
-  const digest = await crypto.subtle.digest('SHA-256', buf)
+  const digest = await subtle.digest('SHA-256', buf)
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
