@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { format, addDays, subDays } from 'date-fns'
+import { fr } from 'date-fns/locale'
 import { getLocalDB, getAllByType } from '../db'
 import { distanceMeters } from '../distance'
 import type { Creche, DayEntry, HomeLocation, Leave } from '../types'
 
 export function DayForm() {
+  const dateInputRef = useRef<HTMLInputElement>(null)
   const today = new Date().toISOString().split('T')[0]
   const [creches, setCreches] = useState<Creche[]>([])
   const [date, setDate] = useState(today)
@@ -29,12 +32,43 @@ export function DayForm() {
     loadDayPlanning()
   }, [])
 
+  const applyDoc = (doc?: DayEntry) => {
+    if (doc) {
+      setExpectedStart(doc.expectedStart || '')
+      setExpectedEnd(doc.expectedEnd || '')
+      setActualStart(doc.actualStart || '')
+      setActualEnd(doc.actualEnd || '')
+      setBreakMinutes(doc.breakMinutes || 0)
+      setLunchMinutes(doc.lunchMinutes || 0)
+      setActualBreakMinutes(doc.actualBreakMinutes || doc.breakMinutes || 0)
+      setActualLunchMinutes(doc.actualLunchMinutes || doc.lunchMinutes || 0)
+      setNotes(doc.notes || '')
+    } else {
+      setExpectedStart('')
+      setExpectedEnd('')
+      setActualStart('')
+      setActualEnd('')
+      setBreakMinutes(0)
+      setLunchMinutes(0)
+      setActualBreakMinutes(0)
+      setActualLunchMinutes(0)
+      setNotes('')
+    }
+  }
+
   const loadDayPlanning = async () => {
     const all = await getAllByType<DayEntry>('day')
     const forDate = all.filter((d) => d.date === date)
     setPlannedDays(forDate)
-    if (forDate.length === 1) setCrecheId(forDate[0].crecheId)
-    else if (!forDate.some((d) => d.crecheId === crecheId)) setCrecheId('')
+    let nextCrecheId = crecheId
+    if (forDate.length === 1) {
+      nextCrecheId = forDate[0].crecheId
+      setCrecheId(nextCrecheId)
+    } else if (!forDate.some((d) => d.crecheId === crecheId)) {
+      nextCrecheId = ''
+      setCrecheId('')
+    }
+    applyDoc(forDate.find((d) => d.crecheId === nextCrecheId))
   }
 
   const loadHome = async () => {
@@ -70,34 +104,11 @@ export function DayForm() {
     }
   }, [home, crecheId, creches])
 
-  const load = () => {
-    const doc = plannedDays.find((d) => d.crecheId === crecheId)
-    if (doc) {
-      setExpectedStart(doc.expectedStart || '08:00')
-      setExpectedEnd(doc.expectedEnd || '17:00')
-      setActualStart(doc.actualStart || '')
-      setActualEnd(doc.actualEnd || '')
-      setBreakMinutes(doc.breakMinutes || 0)
-      setLunchMinutes(doc.lunchMinutes || 0)
-      setActualBreakMinutes(doc.actualBreakMinutes || doc.breakMinutes || 0)
-      setActualLunchMinutes(doc.actualLunchMinutes || doc.lunchMinutes || 0)
-      setNotes(doc.notes || '')
-    } else {
-      setExpectedStart('08:00')
-      setExpectedEnd('17:00')
-      setActualStart('')
-      setActualEnd('')
-      setBreakMinutes(0)
-      setLunchMinutes(0)
-      setActualBreakMinutes(0)
-      setActualLunchMinutes(0)
-      setNotes('')
-    }
-  }
-
   useEffect(() => {
-    if (crecheId) load()
-  }, [date, crecheId])
+    if (crecheId) {
+      applyDoc(plannedDays.find((d) => d.crecheId === crecheId))
+    }
+  }, [crecheId])
 
   const save = async (overrides?: Partial<DayEntry>) => {
     if (!crecheId) return
@@ -107,22 +118,23 @@ export function DayForm() {
       existing = (await getLocalDB().get(id)) as DayEntry
     } catch {}
 
+    const planned = plannedDays.find((d) => d.crecheId === crecheId)
+
     const entry: DayEntry = {
       _id: id,
       _rev: existing?._rev,
       type: 'day',
       date,
       crecheId,
-      expectedStart,
-      expectedEnd,
-      actualStart: actualStart || undefined,
-      actualEnd: actualEnd || undefined,
-      breakMinutes: breakMinutes || undefined,
-      lunchMinutes: lunchMinutes || undefined,
+      expectedStart: planned?.expectedStart,
+      expectedEnd: planned?.expectedEnd,
+      breakMinutes: planned?.breakMinutes,
+      lunchMinutes: planned?.lunchMinutes,
+      actualStart: (overrides?.actualStart as string) || actualStart || undefined,
+      actualEnd: (overrides?.actualEnd as string) || actualEnd || undefined,
       actualBreakMinutes: actualBreakMinutes || undefined,
       actualLunchMinutes: actualLunchMinutes || undefined,
       notes: notes || undefined,
-      ...overrides,
     }
 
     await getLocalDB().put(entry)
@@ -209,7 +221,51 @@ export function DayForm() {
       <section className="card">
         <h2 className="card-title">Jour de travail</h2>
         <label>Date</label>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <input
+          ref={dateInputRef}
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          style={{ position: 'absolute', visibility: 'hidden', width: 0, height: 0 }}
+        />
+        <button
+          className="btn-small btn-secondary"
+          onClick={() => dateInputRef.current?.showPicker?.()}
+          style={{ width: '100%', marginBottom: '0.5rem' }}
+        >
+          {date}
+        </button>
+        <div style={{ display: 'flex', gap: '0.35rem', overflowX: 'auto', marginBottom: '0.75rem', paddingBottom: '0.25rem' }}>
+          <button
+            className="btn-small btn-secondary"
+            onClick={() => setDate(subDays(new Date(date), 1).toISOString().split('T')[0])}
+            style={{ minWidth: '2rem', padding: '0.5rem' }}
+          >
+            ‹
+          </button>
+          {[-2, -1, 0, 1, 2].map((offset) => {
+            const d = addDays(new Date(date), offset)
+            const dStr = d.toISOString().split('T')[0]
+            return (
+              <button
+                key={dStr}
+                className={dStr === date ? 'btn-small btn-primary' : 'btn-small btn-secondary'}
+                onClick={() => setDate(dStr)}
+                style={{ flex: '1 1 auto', minWidth: '3.5rem', padding: '0.35rem 0.25rem', fontSize: '0.7rem', lineHeight: 1.2 }}
+              >
+                <span>{format(d, 'EEE', { locale: fr }).replace('.', '')}</span>
+                <span style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600 }}>{format(d, 'dd/MM')}</span>
+              </button>
+            )
+          })}
+          <button
+            className="btn-small btn-secondary"
+            onClick={() => setDate(addDays(new Date(date), 1).toISOString().split('T')[0])}
+            style={{ minWidth: '2rem', padding: '0.5rem' }}
+          >
+            ›
+          </button>
+        </div>
 
         {leave && (
           <div
@@ -275,18 +331,26 @@ export function DayForm() {
               <tr className="expected-row">
                 <td className="row-label">Prévu</td>
                 <td>
-                  <input
-                    type="time"
-                    value={expectedStart}
-                    onChange={(e) => setExpectedStart(e.target.value)}
-                  />
+                  {expectedStart ? (
+                    <input
+                      type="time"
+                      value={expectedStart}
+                      onChange={(e) => setExpectedStart(e.target.value)}
+                    />
+                  ) : (
+                    <span style={{ color: 'var(--text-secondary)', fontSize: '1.2rem' }}>—</span>
+                  )}
                 </td>
                 <td>
-                  <input
-                    type="time"
-                    value={expectedEnd}
-                    onChange={(e) => setExpectedEnd(e.target.value)}
-                  />
+                  {expectedEnd ? (
+                    <input
+                      type="time"
+                      value={expectedEnd}
+                      onChange={(e) => setExpectedEnd(e.target.value)}
+                    />
+                  ) : (
+                    <span style={{ color: 'var(--text-secondary)', fontSize: '1.2rem' }}>—</span>
+                  )}
                 </td>
               </tr>
               <tr className="actual-row">

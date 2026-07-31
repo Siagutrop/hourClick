@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getAllByType } from '../db'
-import { dayNetMinutes, formatSignedTime } from '../time'
+import { dayNetMinutes, formatTime, formatSignedTime } from '../time'
 import type { Creche, DayEntry } from '../types'
 
 export function Gaps() {
@@ -37,7 +37,7 @@ export function Gaps() {
             color: totalDiff >= 0 ? '#15803d' : '#dc2626',
           }}
         >
-          {totalDiff >= 0 ? '+' : '-'} {formatSignedTime(totalDiff)}
+          {formatSignedTime(totalDiff)}
         </h2>
         <p style={{ color: 'var(--text-secondary)' }}>
           {totalDiff >= 0 ? 'Tu as fait des heures en plus' : 'Tu as moins travaillé que prévu'}
@@ -55,7 +55,7 @@ export function Gaps() {
                   <strong>{r.date}</strong>
                   <small>{crecheName(r.crecheId)}</small>
                   <small>
-                    Prévu {formatSignedTime(r.expected)} — Effectif {formatSignedTime(r.actual)}
+                    Prévu {formatTime(r.expected)} — Effectif {formatTime(r.actual)}
                   </small>
                 </div>
                 <div
@@ -66,7 +66,7 @@ export function Gaps() {
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {r.diff >= 0 ? '+' : '-'} {formatSignedTime(r.diff)}
+                  {formatSignedTime(r.diff)}
                 </div>
               </div>
             </li>
