@@ -25,10 +25,23 @@ export const initSync = async (
   if (remoteDB) {
     remoteDB.close()
   }
-  remoteDB = new PouchDB(`${url}/${dbName}_${user}`, {
+
+  const fullUrl = `${url}/${dbName}_${user}`
+  const authHeader = `Basic ${btoa(`${username}:${password}`)}`
+
+  const createRes = await fetch(fullUrl, {
+    method: 'PUT',
+    headers: { Authorization: authHeader },
+  })
+
+  if (!createRes.ok && createRes.status !== 412) {
+    const text = await createRes.text()
+    throw new Error(`Impossible de creer la base distante : ${createRes.status} ${text}`)
+  }
+
+  remoteDB = new PouchDB(fullUrl, {
     auth: { username, password },
   })
-  await remoteDB.info()
   return getLocalDB().sync(remoteDB, { live: true, retry: true })
 }
 
