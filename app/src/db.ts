@@ -15,7 +15,7 @@ export function getLocalDB() {
 
 let remoteDB: any = null
 
-export const initSync = (
+export const initSync = async (
   url: string,
   username: string,
   password: string,
@@ -28,6 +28,7 @@ export const initSync = (
   remoteDB = new PouchDB(`${url}/${dbName}_${user}`, {
     auth: { username, password },
   })
+  await remoteDB.info()
   return getLocalDB().sync(remoteDB, { live: true, retry: true })
 }
 

@@ -5,8 +5,8 @@ import { themes, applyTheme, type ThemeName } from '../theme'
 import type { HomeLocation } from '../types'
 
 export function Settings({ onLogout }: { onLogout: () => void }) {
-  const [url, setUrl] = useState(import.meta.env.VITE_COUCHDB_URL || '')
-  const [username, setUsername] = useState('')
+  const [url, setUrl] = useState(import.meta.env.VITE_COUCHDB_URL || localStorage.getItem('hourclick_couch_url') || '')
+  const [username, setUsername] = useState(localStorage.getItem('hourclick_couch_user') || '')
   const [password, setPassword] = useState('')
   const [status, setStatus] = useState('Hors ligne')
   const [home, setHome] = useState<HomeLocation | null>(null)
@@ -41,21 +41,32 @@ export function Settings({ onLogout }: { onLogout: () => void }) {
   }
 
   const test = async () => {
+    if (!url) {
+      setStatus('Saisis une URL')
+      return
+    }
     try {
       setStatus('Test…')
-      const res = await fetch(`${url}/`, { credentials: 'include' })
-      setStatus(res.ok ? 'Serveur joignable' : 'Réponse inattendue')
+      const res = await fetch(`${url}/`, {
+        headers: {
+          Authorization: `Basic ${btoa(`${username}:${password}`)}`,
+        },
+      })
+      setStatus(res.ok ? 'Serveur joignable et authentifie' : `Réponse inattendue : ${res.status}`)
     } catch {
       setStatus('Serveur injoignable')
     }
   }
 
-  const startSync = () => {
+  const startSync = async () => {
     try {
-      initSync(url, username, password)
-      setStatus('Sync activée')
-    } catch (e) {
-      setStatus(String(e))
+      setStatus('Connexion…')
+      await initSync(url, username, password)
+      localStorage.setItem('hourclick_couch_url', url)
+      localStorage.setItem('hourclick_couch_user', username)
+      setStatus('Sync activee')
+    } catch (e: any) {
+      setStatus(`Erreur : ${e.message || e}`)
     }
   }
 
