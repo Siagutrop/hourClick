@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getLocalDB, initSync } from '../db'
+import { getLocalDB, initSync, tryAutoSync } from '../db'
 import { getCurrentUser, logout, hasUsers, listUsers } from '../auth'
 import { themes, applyTheme, type ThemeName } from '../theme'
 import type { HomeLocation } from '../types'
@@ -7,7 +7,7 @@ import type { HomeLocation } from '../types'
 export function Settings({ onLogout }: { onLogout: () => void }) {
   const [url, setUrl] = useState(import.meta.env.VITE_COUCHDB_URL || localStorage.getItem('hourclick_couch_url') || '')
   const [username, setUsername] = useState(localStorage.getItem('hourclick_couch_user') || '')
-  const [password, setPassword] = useState('')
+  const [password, setPassword] = useState(localStorage.getItem('hourclick_couch_password') || '')
   const [status, setStatus] = useState('Hors ligne')
   const [home, setHome] = useState<HomeLocation | null>(null)
   const [homeAddress, setHomeAddress] = useState('')
@@ -21,6 +21,7 @@ export function Settings({ onLogout }: { onLogout: () => void }) {
     const initial = stored && themes[stored] ? stored : 'light'
     setTheme(initial)
     applyTheme(initial)
+    tryAutoSync().then(() => setStatus('Sync activee')).catch(() => setStatus('Hors ligne'))
   }, [])
 
   const loadHome = async () => {
@@ -64,6 +65,7 @@ export function Settings({ onLogout }: { onLogout: () => void }) {
       await initSync(url, username, password)
       localStorage.setItem('hourclick_couch_url', url)
       localStorage.setItem('hourclick_couch_user', username)
+      localStorage.setItem('hourclick_couch_password', password)
       setStatus('Sync activee')
     } catch (e: any) {
       setStatus(`Erreur : ${e.message || e}`)

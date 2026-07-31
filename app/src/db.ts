@@ -55,6 +55,16 @@ export const initSync = async (
   return syncHandler
 }
 
+export const tryAutoSync = async () => {
+  const url = localStorage.getItem('hourclick_couch_url')
+  const username = localStorage.getItem('hourclick_couch_user')
+  const password = localStorage.getItem('hourclick_couch_password')
+  if (url && username && password) {
+    return initSync(url, username, password)
+  }
+  return null
+}
+
 export const getAllByType = async <T extends { type: string }>(
   type: string
 ): Promise<T[]> => {
