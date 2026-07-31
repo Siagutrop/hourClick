@@ -1,13 +1,12 @@
 import { useState } from 'react'
-import { hasUsers, listUsers, register, login, logout } from '../auth'
+import { listUsers, login as authLogin, logout } from '../auth'
 
 export function Login({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState('')
   const [pin, setPin] = useState('')
-  const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
-  const isFirst = !hasUsers()
   const existingUsers = listUsers()
+  const isOther = username === 'Autre' || !existingUsers.length
 
   const submit = async () => {
     if (!username.trim() || !pin) {
@@ -15,24 +14,11 @@ export function Login({ onLogin }: { onLogin: () => void }) {
       return
     }
     try {
-      if (isFirst) {
-        if (pin.length < 4) {
-          setError('4 caractères minimum')
-          return
-        }
-        if (pin !== confirm) {
-          setError('Les mots de passe ne correspondent pas')
-          return
-        }
-        await register(username, pin)
+      const ok = await authLogin(username, pin)
+      if (ok) {
         onLogin()
       } else {
-        const ok = await login(username, pin)
-        if (ok) {
-          onLogin()
-        } else {
-          setError('Nom ou mot de passe incorrect')
-        }
+        setError('Mot de passe incorrect')
       }
     } catch (e) {
       setError(String(e))
@@ -42,14 +28,12 @@ export function Login({ onLogin }: { onLogin: () => void }) {
   return (
     <div className="page" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '80svh' }}>
       <div className="card" style={{ textAlign: 'center' }}>
-        <h2 className="card-title">{isFirst ? 'Bienvenue' : 'HourClick'}</h2>
+        <h2 className="card-title">HourClick</h2>
         <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
-          {isFirst
-            ? 'Crée ton premier compte'
-            : 'Connecte-toi à ton compte'}
+          {existingUsers.length ? 'Connecte-toi à ton compte' : 'Crée ton compte'}
         </p>
 
-        {!isFirst && existingUsers.length > 0 && (
+        {existingUsers.length > 0 && (
           <select
             value={username}
             onChange={(e) => setUsername(e.target.value)}
@@ -61,13 +45,14 @@ export function Login({ onLogin }: { onLogin: () => void }) {
                 {u}
               </option>
             ))}
+            <option value="Autre">Autre compte</option>
           </select>
         )}
 
-        {(isFirst || username === 'Autre' || !existingUsers.length) && (
+        {isOther && (
           <input
             type="text"
-            value={username}
+            value={username === 'Autre' ? '' : username}
             onChange={(e) => {
               setUsername(e.target.value)
               setError('')
@@ -89,20 +74,6 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           onKeyDown={(e) => e.key === 'Enter' && submit()}
         />
 
-        {isFirst && (
-          <input
-            type="password"
-            value={confirm}
-            onChange={(e) => {
-              setConfirm(e.target.value)
-              setError('')
-            }}
-            placeholder="Confirmer le mot de passe"
-            style={{ textAlign: 'center', marginTop: '0.75rem' }}
-            onKeyDown={(e) => e.key === 'Enter' && submit()}
-          />
-        )}
-
         {error && (
           <p style={{ color: '#dc2626', marginTop: '0.75rem', fontSize: '0.9rem' }}>
             {error}
@@ -110,10 +81,10 @@ export function Login({ onLogin }: { onLogin: () => void }) {
         )}
 
         <button className="btn-primary" onClick={submit} style={{ marginTop: '1rem' }}>
-          {isFirst ? 'Créer le compte' : 'Ouvrir'}
+          {existingUsers.length ? 'Ouvrir' : 'Créer le compte'}
         </button>
 
-        {!isFirst && (
+        {existingUsers.length > 0 && (
           <>
             <button
               className="btn-secondary"

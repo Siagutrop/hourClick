@@ -70,8 +70,20 @@ export async function register(username: string, pin: string) {
 export async function login(username: string, pin: string) {
   const users = getUsers()
   const user = users.find((u) => u.username === username)
-  if (!user) return false
+
+  if (pin.length < 4) {
+    throw new Error('4 caractères minimum')
+  }
+
   const h = await hashPassword(pin)
+
+  if (!user) {
+    users.push({ username, passwordHash: h })
+    saveUsers(users)
+    setCurrentUser(username)
+    return true
+  }
+
   if (h !== user.passwordHash) return false
   setCurrentUser(username)
   return true
