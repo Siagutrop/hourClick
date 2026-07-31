@@ -14,6 +14,7 @@ export function getLocalDB() {
 }
 
 let remoteDB: any = null
+let syncHandler: any = null
 
 export const initSync = async (
   url: string,
@@ -24,6 +25,9 @@ export const initSync = async (
   const user = getCurrentUser() || 'default'
   if (remoteDB) {
     remoteDB.close()
+  }
+  if (syncHandler) {
+    syncHandler.cancel()
   }
 
   const fullUrl = `${url}/${dbName}_${user}`
@@ -42,7 +46,13 @@ export const initSync = async (
   remoteDB = new PouchDB(fullUrl, {
     auth: { username, password },
   })
-  return getLocalDB().sync(remoteDB, { live: true, retry: true })
+
+  syncHandler = getLocalDB().sync(remoteDB, { live: true, retry: true })
+  syncHandler.on('error', (err: any) => {
+    console.error('Sync error', err)
+  })
+
+  return syncHandler
 }
 
 export const getAllByType = async <T extends { type: string }>(
