@@ -1,12 +1,30 @@
-import { useState } from 'react'
-import { listUsers, login as authLogin, logout } from '../auth'
+import { useEffect, useState } from 'react'
+import { listUsers, login as authLogin, logout, registerFingerprint, loginWithFingerprint, hasFingerprintSupport } from '../auth'
 
 export function Login({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState('')
   const [pin, setPin] = useState('')
   const [error, setError] = useState('')
+  const [msg, setMsg] = useState('')
   const existingUsers = listUsers()
   const isOther = username === 'Autre' || !existingUsers.length
+  const canUseFingerprint = hasFingerprintSupport()
+
+  useEffect(() => {
+    if (canUseFingerprint && existingUsers.some((u) => u)) {
+      handleFingerprint()
+    }
+  }, [])
+
+  const handleFingerprint = async () => {
+    try {
+      setMsg('Lecture de l\'empreinte…')
+      await loginWithFingerprint()
+      onLogin()
+    } catch {
+      setMsg('')
+    }
+  }
 
   const submit = async () => {
     if (!username.trim() || !pin) {
@@ -20,6 +38,19 @@ export function Login({ onLogin }: { onLogin: () => void }) {
       } else {
         setError('Mot de passe incorrect')
       }
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
+  const registerPrint = async () => {
+    if (!username.trim()) {
+      setError('Saisis un nom d\'utilisateur')
+      return
+    }
+    try {
+      await registerFingerprint(username)
+      setMsg('Empreinte enregistrée')
     } catch (e) {
       setError(String(e))
     }
@@ -56,6 +87,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
             onChange={(e) => {
               setUsername(e.target.value)
               setError('')
+              setMsg('')
             }}
             placeholder="Nom d’utilisateur"
             style={{ textAlign: 'center' }}
@@ -68,6 +100,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           onChange={(e) => {
             setPin(e.target.value)
             setError('')
+            setMsg('')
           }}
           placeholder="Mot de passe"
           style={{ textAlign: 'center', marginTop: '0.75rem' }}
@@ -80,9 +113,36 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           </p>
         )}
 
+        {msg && (
+          <p style={{ color: 'var(--primary)', marginTop: '0.75rem', fontSize: '0.9rem' }}>
+            {msg}
+          </p>
+        )}
+
         <button className="btn-primary" onClick={submit} style={{ marginTop: '1rem' }}>
           {existingUsers.length ? 'Ouvrir' : 'Créer le compte'}
         </button>
+
+        {canUseFingerprint && (
+          <>
+            <button
+              className="btn-secondary"
+              onClick={handleFingerprint}
+              style={{ marginTop: '0.75rem' }}
+            >
+              Empreinte digitale
+            </button>
+            {username && username !== 'Autre' && (
+              <button
+                className="btn-secondary"
+                onClick={registerPrint}
+                style={{ marginTop: '0.5rem' }}
+              >
+                Enregistrer mon empreinte
+              </button>
+            )}
+          </>
+        )}
 
         {existingUsers.length > 0 && (
           <>

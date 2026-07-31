@@ -1,6 +1,7 @@
 interface User {
   username: string
   passwordHash: string
+  credentialId?: string
 }
 
 const USERS_KEY = 'hourclick_users'
@@ -38,6 +39,24 @@ function getUsers(): User[] {
 
 function saveUsers(users: User[]) {
   localStorage.setItem(USERS_KEY, JSON.stringify(users))
+}
+
+function bufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i])
+  }
+  return btoa(binary)
+}
+
+function base64ToBuffer(base64: string) {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes.buffer
 }
 
 export function setCurrentUser(username: string) {
@@ -91,4 +110,73 @@ export async function login(username: string, pin: string) {
 
 export function listUsers() {
   return getUsers().map((u) => u.username)
+}
+
+export function hasFingerprintSupport() {
+  return typeof window !== 'undefined' &&
+    window.PublicKeyCredential !== undefined &&
+    typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function'
+}
+
+export async function registerFingerprint(username: string) {
+  const users = getUsers()
+  const user = users.find((u) => u.username === username)
+  if (!user) {
+    throw new Error('Crée d\'abord un compte avec un mot de passe')
+  }
+
+  const challenge = crypto.getRandomValues(new Uint8Array(32))
+  const userId = new TextEncoder().encode(username)
+
+  const credential = (await navigator.credentials.create({
+    publicKey: {
+      challenge,
+      rp: { name: 'HourClick' },
+      user: {
+        id: userId,
+        name: username,
+        displayName: username,
+      },
+      pubKeyCredParams: [{ alg: -7, type: 'public-key' }],
+      authenticatorSelection: {
+        authenticatorAttachment: 'platform',
+        userVerification: 'required',
+      },
+    },
+  })) as PublicKeyCredential
+
+  const credentialId = bufferToBase64(credential.rawId)
+  user.credentialId = credentialId
+  saveUsers(users)
+}
+
+export async function loginWithFingerprint(): Promise<string | null> {
+  const users = getUsers().filter((u) => u.credentialId)
+  if (users.length === 0) {
+    throw new Error('Aucune empreinte enregistrée')
+  }
+
+  const allowCredentials = users.map((u) => ({
+    id: new Uint8Array(base64ToBuffer(u.credentialId!)),
+    type: 'public-key' as const,
+  }))
+
+  const challenge = crypto.getRandomValues(new Uint8Array(32))
+
+  const credential = (await navigator.credentials.get({
+    publicKey: {
+      challenge,
+      allowCredentials,
+      userVerification: 'required',
+    },
+  })) as PublicKeyCredential
+
+  const credentialId = bufferToBase64(credential.rawId)
+  const user = users.find((u) => u.credentialId === credentialId)
+  if (!user) {
+    throw new Error('Empreinte non reconnue')
+  }
+
+  setCurrentUser(user.username)
+  return user.username
 }
