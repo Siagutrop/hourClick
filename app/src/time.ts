@@ -1,4 +1,4 @@
-import type { DayEntry } from './types'
+import type { DayEntry, Leave, Meeting, Replacement } from './types'
 
 export function toMinutes(t?: string) {
   if (!t) return 0
@@ -27,6 +27,24 @@ export function formatTime(min: number) {
   return `${h}h ${m.toString().padStart(2, '0')}`
 }
 
+export function parseSignedTime(s: string): number | null {
+  const t = s.trim()
+  if (!t) return 0
+  const sign = t.startsWith('-') ? -1 : 1
+  const body = t.replace(/^[+-]/, '').trim()
+  const hhmm = body.match(/^(\d+)(?::(\d+))?$/)
+  if (hhmm) {
+    return sign * (Number(hhmm[1]) * 60 + Number(hhmm[2] || 0))
+  }
+  const human = body.match(/^(\d+)h(?:\s*(\d+))?$/)
+  if (human) {
+    return sign * (Number(human[1]) * 60 + Number(human[2] || 0))
+  }
+  const mins = Number(body)
+  if (!Number.isNaN(mins)) return sign * mins
+  return null
+}
+
 export function formatSignedTime(min: number) {
   const sign = min >= 0 ? '+' : '-'
   const h = Math.floor(Math.abs(min) / 60)
@@ -36,4 +54,48 @@ export function formatSignedTime(min: number) {
 
 export function hoursFromMinutes(min: number) {
   return (min / 60).toFixed(2)
+}
+
+export function weekdayOf(isoDate: string) {
+  return (new Date(`${isoDate}T12:00:00`).getDay() + 6) % 7
+}
+
+export function meetingMinutesFor(date: string, meetings: Meeting[]) {
+  const wd = weekdayOf(date)
+  return meetings
+    .filter((m) => m.weekday === wd && m.startTime && m.endTime)
+    .reduce(
+      (s, m) => s + Math.max(0, toMinutes(m.endTime) - toMinutes(m.startTime)),
+      0
+    )
+}
+
+export function replacementMinutesFor(date: string, replacements: Replacement[]) {
+  return replacements
+    .filter((r) => r.date === date)
+    .reduce(
+      (s, r) =>
+        s + Math.max(0, toMinutes(r.endTime) - toMinutes(r.startTime) - (r.breakMinutes || 0)),
+      0
+    )
+}
+
+export function dayGap(
+  d: DayEntry,
+  extrasMin: number,
+  leave?: Leave
+): { expected: number; actual: number; diff: number; neutralized: boolean } {
+  let expected = dayNetMinutes(d, 'expected')
+  let actual = dayNetMinutes(d, 'actual') + extrasMin
+  let neutralized = false
+  if (leave && leave.paid && leave.reason !== 'rattrapage') {
+    if (leave.halfDay) {
+      expected = expected / 2
+    } else {
+      neutralized = true
+      expected = 0
+      actual = 0
+    }
+  }
+  return { expected, actual, diff: actual - expected, neutralized }
 }

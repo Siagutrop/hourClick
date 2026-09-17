@@ -1,3 +1,5 @@
+import type { Profile } from './types'
+
 interface User {
   username: string
   passwordHash: string
@@ -6,6 +8,7 @@ interface User {
 
 const USERS_KEY = 'hourclick_users'
 const CURRENT_USER_KEY = 'hourclick_current_user'
+const PROFILE_ID = 'profile'
 
 function simpleHash(pin: string) {
   let hash = 0
@@ -41,6 +44,17 @@ function saveUsers(users: User[]) {
   localStorage.setItem(USERS_KEY, JSON.stringify(users))
 }
 
+function addLocalUser(username: string, passwordHash: string) {
+  const users = getUsers()
+  const existing = users.find((u) => u.username === username)
+  if (existing) {
+    existing.passwordHash = passwordHash
+  } else {
+    users.push({ username, passwordHash })
+  }
+  saveUsers(users)
+}
+
 function bufferToBase64(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer)
   let binary = ''
@@ -57,6 +71,40 @@ function base64ToBuffer(base64: string) {
     bytes[i] = binary.charCodeAt(i)
   }
   return bytes.buffer
+}
+
+export function getUserDB(username: string) {
+  return new (window as any).PouchDB(`hourclick_${username}`)
+}
+
+async function getProfile(username: string): Promise<Profile | null> {
+  try {
+    return (await getUserDB(username).get(PROFILE_ID)) as Profile
+  } catch {
+    return null
+  }
+}
+
+const getCouchCredentials = () => ({
+  url: import.meta.env.VITE_COUCHDB_URL || localStorage.getItem('hourclick_couch_url') || '',
+  user: import.meta.env.VITE_COUCHDB_USER || localStorage.getItem('hourclick_couch_user') || '',
+  pass: import.meta.env.VITE_COUCHDB_PASSWORD || localStorage.getItem('hourclick_couch_password') || '',
+})
+
+export const pullRemoteUser = async (
+  username: string
+): Promise<{ profile: Profile | null } | null> => {
+  const { url, user, pass } = getCouchCredentials()
+  if (!url || !user || !pass) return null
+  try {
+    const remote = new (window as any).PouchDB(`${url}/hourclick_${username}`, {
+      auth: { username: user, password: pass },
+    })
+    await getUserDB(username).replicate.from(remote)
+    return { profile: await getProfile(username) }
+  } catch {
+    return null
+  }
 }
 
 export function setCurrentUser(username: string) {
@@ -76,34 +124,58 @@ export function hasUsers() {
 }
 
 export async function register(username: string, pin: string) {
-  const users = getUsers()
-  if (users.find((u) => u.username === username)) {
-    throw new Error('Ce compte existe déjà')
+  const existing =
+    (await getProfile(username)) || (await pullRemoteUser(username))?.profile
+  if (existing) {
+    throw new Error('Ce compte existe déjà — connecte-toi')
   }
   const h = await hashPassword(pin)
-  users.push({ username, passwordHash: h })
-  saveUsers(users)
+  await getUserDB(username).put({
+    _id: PROFILE_ID,
+    type: 'profile',
+    username,
+    passwordHash: h,
+  } satisfies Profile)
+  addLocalUser(username, h)
   setCurrentUser(username)
 }
 
 export async function login(username: string, pin: string) {
-  const users = getUsers()
-  const user = users.find((u) => u.username === username)
-
   if (pin.length < 4) {
     throw new Error('4 caractères minimum')
   }
 
   const h = await hashPassword(pin)
+  let profile = await getProfile(username)
+  let remoteOk = false
 
-  if (!user) {
-    users.push({ username, passwordHash: h })
-    saveUsers(users)
+  if (!profile) {
+    const pulled = await pullRemoteUser(username)
+    remoteOk = pulled !== null
+    profile = pulled?.profile || null
+  }
+
+  if (!profile) {
+    const local = getUsers().find((u) => u.username === username)
+    if (local && local.passwordHash !== h) {
+      return false
+    }
+    if (!local && !remoteOk) {
+      return false
+    }
+    await getUserDB(username).put({
+      _id: PROFILE_ID,
+      type: 'profile',
+      username,
+      passwordHash: h,
+    } satisfies Profile)
+    addLocalUser(username, h)
     setCurrentUser(username)
     return true
   }
 
-  if (h !== user.passwordHash) return false
+  if (profile.passwordHash !== h) return false
+  addLocalUser(username, h)
   setCurrentUser(username)
   return true
 }

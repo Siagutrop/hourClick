@@ -5,6 +5,7 @@ import { Dashboard } from './components/Dashboard'
 import { Settings } from './components/Settings'
 import { Login } from './components/Login'
 import { applyTheme, themes, type ThemeName } from './theme'
+import { tryAutoSync } from './db'
 
 const Itinerary = lazy(() => import('./components/Itinerary'))
 
@@ -69,6 +70,12 @@ function App() {
     const initial = stored && themes[stored] ? stored : 'light'
     applyTheme(initial)
   }, [])
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      tryAutoSync().catch(() => {})
+    }
+  }, [isAuthenticated])
 
   if (!isAuthenticated) {
     return <Login onLogin={() => setIsAuthenticated(true)} />

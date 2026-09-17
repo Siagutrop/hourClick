@@ -1,4 +1,5 @@
 import { getCurrentUser } from './auth'
+import type { Profile } from './types'
 
 declare global {
   interface Window {
@@ -55,11 +56,38 @@ export const initSync = async (
   return syncHandler
 }
 
+export const getProfileDoc = async (): Promise<Profile | null> => {
+  try {
+    return (await getLocalDB().get('profile')) as Profile
+  } catch {
+    return null
+  }
+}
+
+export const saveProfileDoc = async (doc: Partial<Profile>) => {
+  const existing = await getProfileDoc()
+  return getLocalDB().put({
+    ...doc,
+    _id: 'profile',
+    _rev: existing?._rev,
+    type: 'profile',
+  })
+}
+
+export const getSyncCredentials = () => {
+  const url =
+    import.meta.env.VITE_COUCHDB_URL || localStorage.getItem('hourclick_couch_url') || ''
+  const username =
+    import.meta.env.VITE_COUCHDB_USER || localStorage.getItem('hourclick_couch_user') || ''
+  const password =
+    import.meta.env.VITE_COUCHDB_PASSWORD || localStorage.getItem('hourclick_couch_password') || ''
+  return { url, username, password }
+}
+
 export const tryAutoSync = async () => {
-  const url = localStorage.getItem('hourclick_couch_url')
-  const username = localStorage.getItem('hourclick_couch_user')
-  const password = localStorage.getItem('hourclick_couch_password')
+  const { url, username, password } = getSyncCredentials()
   if (url && username && password) {
+    localStorage.removeItem('hourclick_couch_password')
     return initSync(url, username, password)
   }
   return null

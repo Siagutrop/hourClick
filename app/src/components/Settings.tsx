@@ -1,28 +1,56 @@
-import { useEffect, useState } from 'react'
-import { getLocalDB, initSync, tryAutoSync } from '../db'
+import { useEffect, useRef, useState } from 'react'
+import { getLocalDB, initSync, tryAutoSync, getProfileDoc, saveProfileDoc, getSyncCredentials } from '../db'
 import { getCurrentUser, logout, hasUsers, listUsers } from '../auth'
 import { themes, applyTheme, type ThemeName } from '../theme'
+import { formatSignedTime, parseSignedTime } from '../time'
 import type { HomeLocation } from '../types'
 
 export function Settings({ onLogout }: { onLogout: () => void }) {
-  const [url, setUrl] = useState(import.meta.env.VITE_COUCHDB_URL || localStorage.getItem('hourclick_couch_url') || '')
-  const [username, setUsername] = useState(localStorage.getItem('hourclick_couch_user') || '')
-  const [password, setPassword] = useState(localStorage.getItem('hourclick_couch_password') || '')
+  const envCredentials = Boolean(
+    import.meta.env.VITE_COUCHDB_URL &&
+    import.meta.env.VITE_COUCHDB_USER &&
+    import.meta.env.VITE_COUCHDB_PASSWORD
+  )
+  const [url, setUrl] = useState(getSyncCredentials().url)
+  const [username, setUsername] = useState(getSyncCredentials().username)
+  const [password, setPassword] = useState('')
   const [status, setStatus] = useState('Hors ligne')
   const [home, setHome] = useState<HomeLocation | null>(null)
   const [homeAddress, setHomeAddress] = useState('')
   const [homeStatus, setHomeStatus] = useState('')
   const [theme, setTheme] = useState<ThemeName>('light')
+  const [initialGap, setInitialGap] = useState('')
+  const [gapStatus, setGapStatus] = useState('')
+  const [backupStatus, setBackupStatus] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const current = getCurrentUser()
 
   useEffect(() => {
     loadHome()
+    loadProfile()
     const stored = localStorage.getItem('hourclick_theme') as ThemeName
     const initial = stored && themes[stored] ? stored : 'light'
     setTheme(initial)
     applyTheme(initial)
-    tryAutoSync().then(() => setStatus('Sync activee')).catch(() => setStatus('Hors ligne'))
+    tryAutoSync().then((s) => s && setStatus('Sync activee')).catch(() => setStatus('Hors ligne'))
   }, [])
+
+  const loadProfile = async () => {
+    const profile = await getProfileDoc()
+    const v = profile?.initialGapMinutes ?? profile?.gapToleranceMinutes ?? 0
+    setInitialGap(v ? formatSignedTime(v) : '')
+  }
+
+  const saveGap = async () => {
+    const parsed = parseSignedTime(initialGap)
+    if (parsed === null) {
+      setGapStatus('Format invalide — ex. +5h30, -1:15 ou 90')
+      return
+    }
+    await saveProfileDoc({ initialGapMinutes: parsed })
+    setGapStatus('Enregistré')
+    setTimeout(() => setGapStatus(''), 2000)
+  }
 
   const loadHome = async () => {
     try {
@@ -41,31 +69,13 @@ export function Settings({ onLogout }: { onLogout: () => void }) {
     localStorage.setItem('hourclick_theme', name)
   }
 
-  const test = async () => {
-    if (!url) {
-      setStatus('Saisis une URL')
-      return
-    }
-    try {
-      setStatus('Test…')
-      const res = await fetch(`${url}/`, {
-        headers: {
-          Authorization: `Basic ${btoa(`${username}:${password}`)}`,
-        },
-      })
-      setStatus(res.ok ? 'Serveur joignable et authentifie' : `Réponse inattendue : ${res.status}`)
-    } catch {
-      setStatus('Serveur injoignable')
-    }
-  }
-
   const startSync = async () => {
     try {
       setStatus('Connexion…')
       await initSync(url, username, password)
       localStorage.setItem('hourclick_couch_url', url)
       localStorage.setItem('hourclick_couch_user', username)
-      localStorage.setItem('hourclick_couch_password', password)
+      localStorage.removeItem('hourclick_couch_password')
       setStatus('Sync activee')
     } catch (e: any) {
       setStatus(`Erreur : ${e.message || e}`)
@@ -109,6 +119,70 @@ export function Settings({ onLogout }: { onLogout: () => void }) {
     }
   }
 
+  const exportData = async () => {
+    setBackupStatus('Export en cours…')
+    try {
+      const result = await getLocalDB().allDocs({ include_docs: true })
+      const docs = result.rows
+        .map((r: any) => r.doc)
+        .filter((d: any) => d && !d._id.startsWith('_design/'))
+      const payload = JSON.stringify(
+        { app: 'hourclick', user: current, exportedAt: new Date().toISOString(), docs },
+        null,
+        2
+      )
+      const blob = new Blob([payload], { type: 'application/json' })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `hourclick_${current}_${new Date().toISOString().split('T')[0]}.json`
+      a.click()
+      URL.revokeObjectURL(a.href)
+      setBackupStatus(`${docs.length} document(s) exportés`)
+    } catch {
+      setBackupStatus('Erreur d\'export')
+    }
+  }
+
+  const importData = async (file: File) => {
+    setBackupStatus('Import en cours…')
+    try {
+      const text = await file.text()
+      const parsed = JSON.parse(text)
+      const docs = Array.isArray(parsed) ? parsed : parsed.docs
+      if (!Array.isArray(docs)) {
+        setBackupStatus('Fichier invalide')
+        return
+      }
+      const db = getLocalDB()
+      const existing = await db.allDocs()
+      const revById = new Map(existing.rows.map((r: any) => [r.id, r.value.rev]))
+      const localProfile = await getProfileDoc()
+
+      const clean = docs
+        .filter((d: any) => d?._id && !d._id.startsWith('_design/'))
+        .map((d: any) => {
+          const doc = { ...d }
+          const localRev = revById.get(doc._id)
+          if (localRev) {
+            doc._rev = localRev
+          } else {
+            delete doc._rev
+          }
+          if (doc._id === 'profile' && localProfile?.passwordHash) {
+            doc.passwordHash = localProfile.passwordHash
+            doc.username = localProfile.username
+          }
+          return doc
+        })
+      await db.bulkDocs(clean)
+      setBackupStatus(`${clean.length} document(s) importés`)
+    } catch {
+      setBackupStatus('Erreur d\'import')
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   return (
     <>
       <section className="card" style={{ textAlign: 'center' }}>
@@ -139,6 +213,24 @@ export function Settings({ onLogout }: { onLogout: () => void }) {
       </section>
 
       <section className="card">
+        <h2 className="card-title">Écart de départ</h2>
+        <label>Écart déjà accumulé quand tu as créé le compte</label>
+        <input
+          value={initialGap}
+          onChange={(e) => setInitialGap(e.target.value)}
+          placeholder="+5h30, -1:15 ou 90"
+        />
+        <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+          {gapStatus || 'Ajouté au total des écarts — ex. +5h30 si tu avais 5h30 d\'avance'}
+        </p>
+        <div className="btn-row" style={{ marginTop: '1rem' }}>
+          <button className="btn-primary" onClick={saveGap}>
+            Enregistrer
+          </button>
+        </div>
+      </section>
+
+      <section className="card">
         <h2 className="card-title">Adresse du domicile</h2>
         <input
           value={homeAddress}
@@ -157,27 +249,58 @@ export function Settings({ onLogout }: { onLogout: () => void }) {
 
       <section className="card">
         <h2 className="card-title">Synchronisation</h2>
-        <label>Serveur CouchDB</label>
-        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://couch.heolyas.uk" />
+        {envCredentials ? (
+          <p style={{ color: 'var(--text-secondary)' }}>
+            Statut : <strong>{status}</strong> — synchronisation automatique vers{' '}
+            <code>{import.meta.env.VITE_COUCHDB_URL}</code>
+          </p>
+        ) : (
+          <>
+            <label>Serveur CouchDB</label>
+            <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://couch.heolyas.uk" />
 
-        <label>Utilisateur CouchDB</label>
-        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="admin" />
+            <label>Utilisateur CouchDB</label>
+            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="admin" />
 
-        <label>Mot de passe CouchDB</label>
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="••••••••"
-        />
+            <label>Mot de passe CouchDB</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+            />
 
-        <p style={{ marginTop: '0.75rem', color: 'var(--text-secondary)' }}>
-          Statut : <strong>{status}</strong>
+            <p style={{ marginTop: '0.75rem', color: 'var(--text-secondary)' }}>
+              Statut : <strong>{status}</strong>
+            </p>
+
+            <div className="btn-row" style={{ marginTop: '1rem' }}>
+              <button className="btn-primary" onClick={startSync}>Synchroniser</button>
+            </div>
+          </>
+        )}
+      </section>
+
+      <section className="card">
+        <h2 className="card-title">Sauvegarde</h2>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+          {backupStatus ||
+            'Tout est inclus : planning, jours, congés, réunions, remplacements, crèches, domicile et réglages'}
         </p>
-
-        <div className="btn-row" style={{ marginTop: '1rem' }}>
-          <button className="btn-secondary" onClick={test}>Tester</button>
-          <button className="btn-primary" onClick={startSync}>Synchroniser</button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,application/json"
+          onChange={(e) => e.target.files?.[0] && importData(e.target.files[0])}
+          style={{ display: 'none' }}
+        />
+        <div className="btn-row" style={{ marginTop: '0.75rem' }}>
+          <button className="btn-secondary" onClick={exportData}>
+            Exporter
+          </button>
+          <button className="btn-secondary" onClick={() => fileInputRef.current?.click()}>
+            Importer
+          </button>
         </div>
       </section>
     </>

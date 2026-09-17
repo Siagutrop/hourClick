@@ -30,7 +30,7 @@ export interface Leave {
   _rev?: string
   type: 'leave'
   date: string
-  reason: 'conge' | 'maladie' | 'formation' | 'autre'
+  reason: 'conge' | 'maladie' | 'formation' | 'rattrapage' | 'autre'
   paid: boolean
   halfDay?: 'morning' | 'afternoon'
   notes?: string
@@ -43,4 +43,41 @@ export interface HomeLocation {
   address: string
   lat?: number
   lon?: number
+}
+
+export interface Profile {
+  _id: string
+  _rev?: string
+  type: 'profile'
+  username: string
+  passwordHash: string
+  initialGapMinutes?: number
+  gapToleranceMinutes?: number
+}
+
+export interface Replacement {
+  _id: string
+  _rev?: string
+  type: 'replacement'
+  date: string
+  crecheId: string
+  startTime: string
+  endTime: string
+  breakMinutes?: number
+  notes?: string
+}
+
+export interface Meeting {
+  _id: string
+  _rev?: string
+  type: 'meeting'
+  weekday: number
+  title: string
+  address: string
+  lat?: number
+  lon?: number
+  startTime?: string
+  endTime?: string
+  travelMinutes?: number
+  notes?: string
 }

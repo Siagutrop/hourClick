@@ -1,9 +1,17 @@
 import { useEffect, useState } from 'react'
-import { getAllByType, getLocalDB } from '../db'
+import { getAllByType, getLocalDB, getProfileDoc } from '../db'
 import { getCurrentUser } from '../auth'
 import { distanceMeters } from '../distance'
-import { dayNetMinutes, formatTime, formatSignedTime } from '../time'
-import type { DayEntry, Creche, HomeLocation, Leave } from '../types'
+import { dayGap, formatTime, formatSignedTime, meetingMinutesFor, replacementMinutesFor } from '../time'
+import type { DayEntry, Creche, HomeLocation, Leave, Meeting, Replacement } from '../types'
+
+const LEAVE_LABELS: Record<Leave['reason'], string> = {
+  conge: 'Conge',
+  maladie: 'Maladie',
+  formation: 'Formation',
+  rattrapage: "Rattrapage d'heures",
+  autre: 'Autre',
+}
 
 function formatFrenchDate(iso: string) {
   const [y, m, d] = iso.split('-')
@@ -23,12 +31,18 @@ export function WeekView() {
   const [creches, setCreches] = useState<Creche[]>([])
   const [home, setHome] = useState<HomeLocation | null>(null)
   const [leaves, setLeaves] = useState<Leave[]>([])
+  const [meetings, setMeetings] = useState<Meeting[]>([])
+  const [replacements, setReplacements] = useState<Replacement[]>([])
+  const [initialGap, setInitialGap] = useState(0)
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7))
 
   useEffect(() => {
     getAllByType<DayEntry>('day').then(setDays)
     getAllByType<Creche>('creche').then(setCreches)
     getAllByType<Leave>('leave').then(setLeaves)
+    getAllByType<Meeting>('meeting').then(setMeetings)
+    getAllByType<Replacement>('replacement').then(setReplacements)
+    getProfileDoc().then((p) => setInitialGap(p?.initialGapMinutes ?? p?.gapToleranceMinutes ?? 0))
     getLocalDB()
       .get('home')
       .then((doc: unknown) => setHome(doc as HomeLocation))
@@ -39,17 +53,21 @@ export function WeekView() {
 
   const filteredDays = days.filter((d) => d.date.startsWith(month))
   const filteredLeaves = leaves.filter((l) => l.date.startsWith(month))
+  const filteredReplacements = replacements.filter((r) => r.date.startsWith(month))
+
+  const extrasFor = (date: string) =>
+    meetingMinutesFor(date, meetings) + replacementMinutesFor(date, replacements)
 
   const { totalMinutes, totalExpected, totalGap, totalKm } = filteredDays.reduce(
     (acc, d) => {
-      const expected = dayNetMinutes(d, 'expected')
-      const actual = dayNetMinutes(d, 'actual')
+      const leave = filteredLeaves.find((l) => l.date === d.date)
+      const { expected, actual, diff } = dayGap(d, extrasFor(d.date), leave)
       const creche = creches.find((c) => c._id === d.crecheId)
       const km = calcKm(home, creche)
       return {
         totalMinutes: acc.totalMinutes + actual,
         totalExpected: acc.totalExpected + expected,
-        totalGap: acc.totalGap + (actual - expected),
+        totalGap: acc.totalGap + diff,
         totalKm: acc.totalKm + km,
       }
     },
@@ -61,11 +79,18 @@ export function WeekView() {
   const totalLeaveDays = filteredLeaves.reduce((sum, l) => sum + (l.halfDay ? 0.5 : 1), 0)
 
   const rows = filteredDays.map((d) => {
-    const expected = dayNetMinutes(d, 'expected')
-    const actual = dayNetMinutes(d, 'actual')
-    const gap = actual - expected
+    const leave = filteredLeaves.find((l) => l.date === d.date)
+    const meetingMin = meetingMinutesFor(d.date, meetings)
+    const replMin = replacementMinutesFor(d.date, replacements)
+    const { actual, diff, neutralized } = dayGap(d, meetingMin + replMin, leave)
     const creche = creches.find((c) => c._id === d.crecheId)
     const km = calcKm(home, creche)
+    const notesParts = [
+      leave && `${LEAVE_LABELS[leave.reason]}${leave.halfDay ? ` ${leave.halfDay === 'morning' ? 'matin' : 'apres-midi'}` : ''}`,
+      meetingMin > 0 && `Reunion ${formatTime(meetingMin)}`,
+      replMin > 0 && `Remplacement ${formatTime(replMin)}`,
+      d.notes,
+    ].filter(Boolean)
     return [
       formatFrenchDate(d.date),
       crecheName(d.crecheId),
@@ -76,19 +101,42 @@ export function WeekView() {
       String(d.breakMinutes || 0),
       String(d.lunchMinutes || 0),
       formatTime(actual),
-      formatSignedTime(gap),
+      neutralized ? LEAVE_LABELS[leave!.reason] : formatSignedTime(diff),
       String(km > 0 ? km : '-'),
-      d.notes || '',
+      notesParts.join(' — '),
     ]
   })
 
   const leaveRows = filteredLeaves.map((l) => [
     formatFrenchDate(l.date),
-    l.reason === 'conge' ? 'Conge' : l.reason === 'maladie' ? 'Maladie' : l.reason === 'formation' ? 'Formation' : 'Autre',
+    LEAVE_LABELS[l.reason],
     l.halfDay ? (l.halfDay === 'morning' ? 'Matin' : 'Apres-midi') : 'Journee',
     l.paid ? 'Paye' : 'Non paye',
     l.notes || '',
   ])
+
+  const replRows = filteredReplacements.map((r) => [
+    formatFrenchDate(r.date),
+    crecheName(r.crecheId),
+    `${r.startTime} -> ${r.endTime}`,
+    r.breakMinutes ? `${r.breakMinutes} min` : '-',
+    formatTime(replacementMinutesFor(r.date, [r])),
+    r.notes || '',
+  ])
+
+  const meetingRows = meetings.map((m) => {
+    const km =
+      home?.lat != null && home?.lon != null && m.lat != null && m.lon != null
+        ? Math.round((distanceMeters(home.lat, home.lon, m.lat, m.lon) / 1000) * 2 * 10) / 10
+        : null
+    return [
+      ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'][m.weekday],
+      m.title,
+      m.startTime && m.endTime ? `${m.startTime} -> ${m.endTime}` : '-',
+      m.address,
+      km != null ? `${km} km${m.travelMinutes != null ? ` (~${m.travelMinutes} min)` : ''}` : '-',
+    ]
+  })
 
   const exportCSV = () => {
     const header = [
@@ -109,11 +157,32 @@ export function WeekView() {
       .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';'))
       .join('\n')
 
+    if (initialGap !== 0) {
+      csv += `\n\nSolde de depart : ${formatSignedTime(initialGap)}`
+      csv += `\nEcart cumule : ${formatSignedTime(initialGap + totalGap)}`
+    }
+
     if (leaveRows.length > 0) {
       csv += `\n\nTotal jours de conge inclus : ${totalLeaveDays}\n`
       csv += 'Conges\n'
       const leaveHeader = ['Date', 'Type', 'Temps', 'Paye', 'Notes']
       csv += [leaveHeader, ...leaveRows]
+        .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';'))
+        .join('\n')
+    }
+
+    if (replRows.length > 0) {
+      csv += '\n\nRemplacements\n'
+      const replHeader = ['Date', 'Creche', 'Horaires', 'Pause', 'Duree nette', 'Notes']
+      csv += [replHeader, ...replRows]
+        .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';'))
+        .join('\n')
+    }
+
+    if (meetingRows.length > 0) {
+      csv += '\n\nReunions (recurrentes)\n'
+      const meetingHeader = ['Jour', 'Titre', 'Horaires', 'Adresse', 'Trajet AR']
+      csv += [meetingHeader, ...meetingRows]
         .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';'))
         .join('\n')
     }
@@ -145,11 +214,15 @@ export function WeekView() {
     doc.text(`Employe : ${user}`, 14, 28)
     doc.text(`Total effectif : ${hours} heures`, 14, 34)
     doc.text(`Total prevu : ${(totalExpected / 60).toFixed(2)} heures`, 14, 40)
-    doc.text(`Ecart total : ${formatSignedTime(totalGap)}`, 14, 46)
+    doc.text(`Ecart du mois : ${formatSignedTime(totalGap)}`, 14, 46)
     doc.text(`Kilometres AR : ${totalKm} km`, 14, 52)
     doc.text(`Journees pointees : ${filteredDays.filter((d) => d.actualStart && d.actualEnd).length}`, 14, 58)
     doc.text(`Jours de conge inclus : ${totalLeaveDays}`, 14, 64)
-    doc.text(`Genere le : ${now}`, 14, 70)
+    if (initialGap !== 0) {
+      doc.text(`Solde de depart : ${formatSignedTime(initialGap)}`, 14, 70)
+      doc.text(`Ecart cumule : ${formatSignedTime(initialGap + totalGap)}`, 14, 76)
+    }
+    doc.text(`Genere le : ${now}`, 14, initialGap !== 0 ? 82 : 70)
 
     autoTable(doc, {
       startY: 78,
@@ -223,6 +296,38 @@ export function WeekView() {
       })
     }
 
+    if (replRows.length > 0) {
+      const finalY = (doc as any).lastAutoTable?.finalY || 150
+      doc.setFontSize(14)
+      doc.text('Remplacements', 14, finalY + 16)
+      autoTable(doc, {
+        startY: finalY + 22,
+        head: [['Date', 'Creche', 'Horaires', 'Pause', 'Duree nette', 'Notes']],
+        body: replRows,
+        headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
+        bodyStyles: { textColor: 60 },
+        alternateRowStyles: { fillColor: [249, 250, 251] },
+        styles: { fontSize: 9, cellPadding: 2 },
+        margin: { top: 10, right: 10, bottom: 10, left: 10 },
+      })
+    }
+
+    if (meetingRows.length > 0) {
+      const finalY = (doc as any).lastAutoTable?.finalY || 150
+      doc.setFontSize(14)
+      doc.text('Reunions recurrentes', 14, finalY + 16)
+      autoTable(doc, {
+        startY: finalY + 22,
+        head: [['Jour', 'Titre', 'Horaires', 'Adresse', 'Trajet AR']],
+        body: meetingRows,
+        headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
+        bodyStyles: { textColor: 60 },
+        alternateRowStyles: { fillColor: [249, 250, 251] },
+        styles: { fontSize: 9, cellPadding: 2 },
+        margin: { top: 10, right: 10, bottom: 10, left: 10 },
+      })
+    }
+
     doc.save(`heures-${month}.pdf`)
   }
 
@@ -261,7 +366,7 @@ export function WeekView() {
             <li key={l._id} className="list-item">
               <strong>{l.date}</strong>
               <small>
-                {l.reason === 'conge' ? 'Congé' : l.reason === 'maladie' ? 'Maladie' : l.reason === 'formation' ? 'Formation' : 'Autre'}
+                {LEAVE_LABELS[l.reason]}
                 {l.halfDay ? ` — ${l.halfDay === 'morning' ? 'Matin' : 'Après-midi'}` : ''}
               </small>
               <small>{l.paid ? 'Payé' : 'Non payé'}</small>

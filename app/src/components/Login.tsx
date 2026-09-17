@@ -1,17 +1,26 @@
 import { useEffect, useState } from 'react'
-import { listUsers, login as authLogin, logout, registerFingerprint, loginWithFingerprint, hasFingerprintSupport } from '../auth'
+import {
+  listUsers,
+  login as authLogin,
+  register as authRegister,
+  registerFingerprint,
+  loginWithFingerprint,
+  hasFingerprintSupport,
+} from '../auth'
 
 export function Login({ onLogin }: { onLogin: () => void }) {
+  const [mode, setMode] = useState<'login' | 'register'>(listUsers().length ? 'login' : 'register')
   const [username, setUsername] = useState('')
   const [pin, setPin] = useState('')
+  const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
   const existingUsers = listUsers()
-  const isOther = username === 'Autre' || !existingUsers.length
   const canUseFingerprint = hasFingerprintSupport()
 
   useEffect(() => {
-    if (canUseFingerprint && existingUsers.some((u) => u)) {
+    if (canUseFingerprint && existingUsers.length > 0) {
       handleFingerprint()
     }
   }, [])
@@ -31,15 +40,31 @@ export function Login({ onLogin }: { onLogin: () => void }) {
       setError('Saisis un nom et un mot de passe')
       return
     }
+    setBusy(true)
+    setError('')
+    setMsg('')
     try {
-      const ok = await authLogin(username, pin)
-      if (ok) {
+      if (mode === 'register') {
+        if (pin !== confirm) {
+          setError('Les mots de passe ne correspondent pas')
+          return
+        }
+        await authRegister(username.trim(), pin)
         onLogin()
       } else {
-        setError('Mot de passe incorrect')
+        setMsg('Vérification…')
+        const ok = await authLogin(username.trim(), pin)
+        if (ok) {
+          onLogin()
+        } else {
+          setError('Nom ou mot de passe incorrect')
+        }
       }
     } catch (e) {
-      setError(String(e))
+      setError(String(e instanceof Error ? e.message : e))
+    } finally {
+      setBusy(false)
+      setMsg('')
     }
   }
 
@@ -49,11 +74,19 @@ export function Login({ onLogin }: { onLogin: () => void }) {
       return
     }
     try {
-      await registerFingerprint(username)
+      await registerFingerprint(username.trim())
       setMsg('Empreinte enregistrée')
     } catch (e) {
-      setError(String(e))
+      setError(String(e instanceof Error ? e.message : e))
     }
+  }
+
+  const switchMode = (m: 'login' | 'register') => {
+    setMode(m)
+    setError('')
+    setMsg('')
+    setPin('')
+    setConfirm('')
   }
 
   return (
@@ -61,38 +94,26 @@ export function Login({ onLogin }: { onLogin: () => void }) {
       <div className="card" style={{ textAlign: 'center' }}>
         <h2 className="card-title">HourClick</h2>
         <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
-          {existingUsers.length ? 'Connecte-toi à ton compte' : 'Crée ton compte'}
+          {mode === 'login' ? 'Connecte-toi à ton compte' : 'Crée ton compte'}
         </p>
 
-        {existingUsers.length > 0 && (
-          <select
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            style={{ marginBottom: '0.75rem' }}
-          >
-            <option value="">Choisir un compte…</option>
-            {existingUsers.map((u) => (
-              <option key={u} value={u}>
-                {u}
-              </option>
-            ))}
-            <option value="Autre">Autre compte</option>
-          </select>
-        )}
-
-        {isOther && (
-          <input
-            type="text"
-            value={username === 'Autre' ? '' : username}
-            onChange={(e) => {
-              setUsername(e.target.value)
-              setError('')
-              setMsg('')
-            }}
-            placeholder="Nom d’utilisateur"
-            style={{ textAlign: 'center' }}
-          />
-        )}
+        <input
+          type="text"
+          list="hourclick-users"
+          value={username}
+          onChange={(e) => {
+            setUsername(e.target.value)
+            setError('')
+          }}
+          placeholder="Nom d’utilisateur"
+          style={{ textAlign: 'center' }}
+          autoComplete="username"
+        />
+        <datalist id="hourclick-users">
+          {existingUsers.map((u) => (
+            <option key={u} value={u} />
+          ))}
+        </datalist>
 
         <input
           type="password"
@@ -100,12 +121,27 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           onChange={(e) => {
             setPin(e.target.value)
             setError('')
-            setMsg('')
           }}
           placeholder="Mot de passe"
           style={{ textAlign: 'center', marginTop: '0.75rem' }}
+          autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
           onKeyDown={(e) => e.key === 'Enter' && submit()}
         />
+
+        {mode === 'register' && (
+          <input
+            type="password"
+            value={confirm}
+            onChange={(e) => {
+              setConfirm(e.target.value)
+              setError('')
+            }}
+            placeholder="Confirmer le mot de passe"
+            style={{ textAlign: 'center', marginTop: '0.75rem' }}
+            autoComplete="new-password"
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+          />
+        )}
 
         {error && (
           <p style={{ color: '#dc2626', marginTop: '0.75rem', fontSize: '0.9rem' }}>
@@ -119,11 +155,21 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           </p>
         )}
 
-        <button className="btn-primary" onClick={submit} style={{ marginTop: '1rem' }}>
-          {existingUsers.length ? 'Ouvrir' : 'Créer le compte'}
+        <button className="btn-primary" onClick={submit} disabled={busy} style={{ marginTop: '1rem' }}>
+          {mode === 'login' ? 'Se connecter' : 'Créer le compte'}
         </button>
 
-        {canUseFingerprint && (
+        {mode === 'login' ? (
+          <button className="btn-secondary" onClick={() => switchMode('register')} style={{ marginTop: '0.75rem' }}>
+            Créer un compte
+          </button>
+        ) : (
+          <button className="btn-secondary" onClick={() => switchMode('login')} style={{ marginTop: '0.75rem' }}>
+            J’ai déjà un compte
+          </button>
+        )}
+
+        {canUseFingerprint && mode === 'login' && (
           <>
             <button
               className="btn-secondary"
@@ -132,7 +178,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
             >
               Empreinte digitale
             </button>
-            {username && username !== 'Autre' && (
+            {username.trim() && (
               <button
                 className="btn-secondary"
                 onClick={registerPrint}
@@ -141,27 +187,6 @@ export function Login({ onLogin }: { onLogin: () => void }) {
                 Enregistrer mon empreinte
               </button>
             )}
-          </>
-        )}
-
-        {existingUsers.length > 0 && (
-          <>
-            <button
-              className="btn-secondary"
-              onClick={() => setUsername('Autre')}
-              style={{ marginTop: '0.75rem' }}
-            >
-              Autre compte
-            </button>
-            <button
-              className="btn-secondary"
-              onClick={() => {
-                logout()
-              }}
-              style={{ marginTop: '0.5rem' }}
-            >
-              Tout effacer
-            </button>
           </>
         )}
       </div>

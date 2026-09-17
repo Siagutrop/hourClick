@@ -7,6 +7,7 @@ const reasons: { key: Leave['reason']; label: string }[] = [
   { key: 'conge', label: 'Congé' },
   { key: 'maladie', label: 'Maladie' },
   { key: 'formation', label: 'Formation' },
+  { key: 'rattrapage', label: "Rattrapage d'heures" },
   { key: 'autre', label: 'Autre' },
 ]
 

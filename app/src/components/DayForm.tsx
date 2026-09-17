@@ -3,7 +3,7 @@ import { format, addDays, subDays } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { getLocalDB, getAllByType } from '../db'
 import { distanceMeters } from '../distance'
-import type { Creche, DayEntry, HomeLocation, Leave } from '../types'
+import type { Creche, DayEntry, HomeLocation, Leave, Meeting, Replacement } from '../types'
 
 export function DayForm() {
   const dateInputRef = useRef<HTMLInputElement>(null)
@@ -25,12 +25,29 @@ export function DayForm() {
   const [km, setKm] = useState(0)
   const [leave, setLeave] = useState<Leave | null>(null)
   const [plannedDays, setPlannedDays] = useState<DayEntry[]>([])
+  const [meetings, setMeetings] = useState<Meeting[]>([])
+  const [replacements, setReplacements] = useState<Replacement[]>([])
+  const [replCrecheId, setReplCrecheId] = useState('')
+  const [replStart, setReplStart] = useState('')
+  const [replEnd, setReplEnd] = useState('')
+  const [replBreak, setReplBreak] = useState(0)
+  const [showReplForm, setShowReplForm] = useState(false)
 
   useEffect(() => {
     getAllByType<Creche>('creche').then(setCreches)
+    getAllByType<Meeting>('meeting').then(setMeetings)
     loadHome()
     loadDayPlanning()
+    loadReplacements()
   }, [])
+
+  const weekdayOfDate = (new Date(date).getDay() + 6) % 7
+  const dayMeetings = meetings.filter((m) => m.weekday === weekdayOfDate)
+
+  const meetingKm = (m: Meeting) => {
+    if (home?.lat == null || home?.lon == null || m.lat == null || m.lon == null) return null
+    return Math.round((distanceMeters(home.lat, home.lon, m.lat, m.lon) / 1000) * 2 * 10) / 10
+  }
 
   const applyDoc = (doc?: DayEntry) => {
     if (doc) {
@@ -89,9 +106,44 @@ export function DayForm() {
     }
   }
 
+  const loadReplacements = async () => {
+    const all = await getAllByType<Replacement>('replacement')
+    setReplacements(all.filter((r) => r.date === date))
+  }
+
+  const addReplacement = async () => {
+    if (!replCrecheId || !replStart || !replEnd) {
+      setGpsStatus('Remplacement : choisis une crèche et les horaires')
+      return
+    }
+    const doc: Replacement = {
+      _id: `repl_${date}_${Date.now()}`,
+      type: 'replacement',
+      date,
+      crecheId: replCrecheId,
+      startTime: replStart,
+      endTime: replEnd,
+      breakMinutes: replBreak || undefined,
+    }
+    await getLocalDB().put(doc)
+    setReplCrecheId('')
+    setReplStart('')
+    setReplEnd('')
+    setReplBreak(0)
+    setShowReplForm(false)
+    loadReplacements()
+  }
+
+  const removeReplacement = async (r: Replacement) => {
+    if (!r._rev || !confirm('Supprimer ce remplacement ?')) return
+    await getLocalDB().remove(r._id, r._rev)
+    loadReplacements()
+  }
+
   useEffect(() => {
     loadLeave()
     loadDayPlanning()
+    loadReplacements()
   }, [date])
 
   useEffect(() => {
@@ -279,7 +331,7 @@ export function DayForm() {
             }}
           >
             <strong style={{ color: 'var(--primary)' }}>
-              {leave.reason === 'conge' ? 'Congé' : leave.reason === 'maladie' ? 'Maladie' : leave.reason === 'formation' ? 'Formation' : 'Autre'}
+              {leave.reason === 'conge' ? 'Congé' : leave.reason === 'maladie' ? 'Maladie' : leave.reason === 'formation' ? 'Formation' : leave.reason === 'rattrapage' ? "Rattrapage d'heures" : 'Autre'}
               {leave.halfDay ? ` — ${leave.halfDay === 'morning' ? 'Matin' : 'Après-midi'}` : ''}
             </strong>
             <p style={{ margin: '0.25rem 0 0', fontSize: '0.875rem' }}>
@@ -287,6 +339,105 @@ export function DayForm() {
               {leave.notes ? ` — ${leave.notes}` : ''}
             </p>
           </div>
+        )}
+
+        {dayMeetings.map((m) => {
+          const km = meetingKm(m)
+          return (
+            <div
+              key={m._id}
+              style={{
+                marginTop: '0.75rem',
+                padding: '0.75rem',
+                background: 'var(--primary-soft)',
+                border: '1px solid var(--primary)',
+                borderRadius: '0.75rem',
+              }}
+            >
+              <strong style={{ color: 'var(--primary)' }}>Réunion — {m.title}</strong>
+              <p style={{ margin: '0.25rem 0 0', fontSize: '0.875rem' }}>
+                {m.address}
+                {m.startTime && m.endTime ? ` — ${m.startTime} → ${m.endTime}` : ''}
+                {km != null ? ` — trajet A/R : ${km} km` : ''}
+                {m.travelMinutes != null ? ` (~${m.travelMinutes} min)` : ''}
+              </p>
+            </div>
+          )
+        })}
+
+        {replacements.map((r) => {
+          const creche = creches.find((c) => c._id === r.crecheId)
+          return (
+            <div
+              key={r._id}
+              style={{
+                marginTop: '0.75rem',
+                padding: '0.75rem',
+                background: 'var(--primary-soft)',
+                border: '1px solid var(--primary)',
+                borderRadius: '0.75rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'start',
+              }}
+            >
+              <div>
+                <strong style={{ color: 'var(--primary)' }}>
+                  Remplacement — {creche?.name || r.crecheId}
+                </strong>
+                <p style={{ margin: '0.25rem 0 0', fontSize: '0.875rem' }}>
+                  {r.startTime} → {r.endTime}
+                  {r.breakMinutes ? ` — pause ${r.breakMinutes} min` : ''}
+                </p>
+              </div>
+              <button className="btn-danger btn-small" onClick={() => removeReplacement(r)}>
+                ×
+              </button>
+            </div>
+          )
+        })}
+
+        {showReplForm ? (
+          <div style={{ marginTop: '0.75rem' }}>
+            <label>Crèche du remplacement</label>
+            <select value={replCrecheId} onChange={(e) => setReplCrecheId(e.target.value)}>
+              <option value="">Choisir une crèche…</option>
+              {creches.map((c) => (
+                <option key={c._id} value={c._id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <div className="btn-row" style={{ marginTop: '0.5rem' }}>
+              <input type="time" value={replStart} onChange={(e) => setReplStart(e.target.value)} />
+              <input type="time" value={replEnd} onChange={(e) => setReplEnd(e.target.value)} />
+            </div>
+            <label style={{ marginTop: '0.5rem' }}>Pause (min)</label>
+            <input
+              type="number"
+              min={0}
+              step={5}
+              value={replBreak}
+              onChange={(e) => setReplBreak(Number(e.target.value))}
+              placeholder="0"
+            />
+            <div className="btn-row" style={{ marginTop: '0.5rem' }}>
+              <button className="btn-primary" onClick={addReplacement}>
+                Ajouter
+              </button>
+              <button className="btn-secondary" onClick={() => setShowReplForm(false)}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            className="btn-secondary"
+            onClick={() => setShowReplForm(true)}
+            style={{ marginTop: '0.75rem' }}
+          >
+            + Remplacement
+          </button>
         )}
 
         <label>Crèche</label>
