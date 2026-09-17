@@ -4,7 +4,7 @@ import { Data } from './components/Data'
 import { Dashboard } from './components/Dashboard'
 import { Settings } from './components/Settings'
 import { Login } from './components/Login'
-import { WeeklyGoal } from './components/WeeklyGoal'
+import { WeeklyGoal, Clock, PresenceBadge } from './components/WeeklyGoal'
 import { applyTheme, themes, type ThemeName } from './theme'
 import { tryAutoSync, getProfileDoc } from './db'
 import { startReminders } from './notifications'
@@ -91,7 +91,11 @@ function App() {
     <>
       <header className="header">
         <h1>HourClick</h1>
-        <WeeklyGoal />
+        <div style={{ textAlign: 'right' }}>
+          <Clock />
+          <WeeklyGoal />
+          <PresenceBadge />
+        </div>
       </header>
 
       <main className="page">

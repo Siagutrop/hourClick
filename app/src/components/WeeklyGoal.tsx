@@ -14,6 +14,53 @@ function weekBounds() {
   return { start: iso(monday), end: iso(sunday) }
 }
 
+export function Clock() {
+  const [now, setNow] = useState(new Date())
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  return (
+    <span style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--primary)', fontVariantNumeric: 'tabular-nums' }}>
+      {now.toLocaleTimeString('fr-FR')}
+    </span>
+  )
+}
+
+export function PresenceBadge() {
+  const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    let alive = true
+    const check = async () => {
+      const today = new Date().toISOString().split('T')[0]
+      const days = await getAllByType<DayEntry>('day')
+      const active = days.find((d) => d.date === today && d.actualStart && !d.actualEnd)
+      if (!alive) return
+      if (active?.actualStart) {
+        const [h, m] = active.actualStart.split(':').map(Number)
+        const now = new Date()
+        setElapsed(Math.max(0, now.getHours() * 60 + now.getMinutes() - (h * 60 + m)))
+      } else {
+        setElapsed(0)
+      }
+    }
+    check()
+    const t = setInterval(check, 30_000)
+    return () => {
+      alive = false
+      clearInterval(t)
+    }
+  }, [])
+
+  if (elapsed <= 0) return null
+  return (
+    <p style={{ margin: '0.15rem 0 0', color: 'var(--primary)', fontSize: '0.65rem', textAlign: 'right', whiteSpace: 'nowrap' }}>
+      En poste depuis {formatTime(elapsed)}
+    </p>
+  )
+}
+
 export function WeeklyGoal() {
   const [days, setDays] = useState<DayEntry[]>([])
   const [meetings, setMeetings] = useState<Meeting[]>([])

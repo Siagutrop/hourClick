@@ -39,7 +39,9 @@ export function Settings({ onLogout }: { onLogout: () => void }) {
     const initial = stored && themes[stored] ? stored : 'light'
     setTheme(initial)
     applyTheme(initial)
-    tryAutoSync().then((s) => s && setStatus('Sync activee')).catch(() => setStatus('Hors ligne'))
+    tryAutoSync()
+      .then((s) => setStatus(s ? 'Sync activee' : 'Hors ligne — identifiants CouchDB manquants'))
+      .catch((e) => setStatus(`Hors ligne — ${e?.message || 'erreur inconnue'}`))
   }, [])
 
   const loadProfile = async () => {
