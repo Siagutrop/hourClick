@@ -4,8 +4,10 @@ import { Data } from './components/Data'
 import { Dashboard } from './components/Dashboard'
 import { Settings } from './components/Settings'
 import { Login } from './components/Login'
+import { WeeklyGoal } from './components/WeeklyGoal'
 import { applyTheme, themes, type ThemeName } from './theme'
-import { tryAutoSync } from './db'
+import { tryAutoSync, getProfileDoc } from './db'
+import { startReminders } from './notifications'
 
 const Itinerary = lazy(() => import('./components/Itinerary'))
 
@@ -72,9 +74,13 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (isAuthenticated) {
-      tryAutoSync().catch(() => {})
-    }
+    if (!isAuthenticated) return
+    tryAutoSync().catch(() => {})
+    let stop: (() => void) | undefined
+    getProfileDoc().then((p) => {
+      if (p?.notificationsEnabled) stop = startReminders()
+    })
+    return () => stop?.()
   }, [isAuthenticated])
 
   if (!isAuthenticated) {
@@ -85,6 +91,7 @@ function App() {
     <>
       <header className="header">
         <h1>HourClick</h1>
+        <WeeklyGoal />
       </header>
 
       <main className="page">

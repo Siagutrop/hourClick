@@ -146,13 +146,20 @@ export async function login(username: string, pin: string) {
   }
 
   const h = await hashPassword(pin)
-  let profile = await getProfile(username)
   let remoteOk = false
 
-  if (!profile) {
-    const pulled = await pullRemoteUser(username)
-    remoteOk = pulled !== null
-    profile = pulled?.profile || null
+  const pulled = await pullRemoteUser(username)
+  if (pulled) remoteOk = true
+  let profile = pulled?.profile || (await getProfile(username))
+
+  if (profile?.resetPin) {
+    if (pin !== profile.resetPin) return false
+    profile.passwordHash = h
+    delete profile.resetPin
+    await getUserDB(username).put(profile)
+    addLocalUser(username, h)
+    setCurrentUser(username)
+    return true
   }
 
   if (!profile) {
@@ -178,6 +185,34 @@ export async function login(username: string, pin: string) {
   addLocalUser(username, h)
   setCurrentUser(username)
   return true
+}
+
+export async function changePin(oldPin: string, newPin: string) {
+  const username = getCurrentUser()
+  if (!username) throw new Error('Non connecté')
+  if (newPin.length < 4) throw new Error('4 caractères minimum')
+
+  const profile = await getProfile(username)
+  const oldHash = await hashPassword(oldPin)
+  const local = getUsers().find((u) => u.username === username)
+  const currentHash = profile?.passwordHash || local?.passwordHash
+  if (!currentHash || currentHash !== oldHash) {
+    throw new Error('Ancien PIN incorrect')
+  }
+
+  const h = await hashPassword(newPin)
+  if (profile) {
+    profile.passwordHash = h
+    await getUserDB(username).put(profile)
+  } else {
+    await getUserDB(username).put({
+      _id: PROFILE_ID,
+      type: 'profile',
+      username,
+      passwordHash: h,
+    } satisfies Profile)
+  }
+  addLocalUser(username, h)
 }
 
 export function listUsers() {

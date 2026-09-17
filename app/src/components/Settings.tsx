@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { getLocalDB, initSync, tryAutoSync, getProfileDoc, saveProfileDoc, getSyncCredentials } from '../db'
-import { getCurrentUser, logout, hasUsers, listUsers } from '../auth'
+import { getCurrentUser, logout, hasUsers, listUsers, changePin } from '../auth'
 import { themes, applyTheme, type ThemeName } from '../theme'
 import { formatSignedTime, parseSignedTime } from '../time'
+import { enableNotifications } from '../notifications'
 import type { HomeLocation } from '../types'
 
 export function Settings({ onLogout }: { onLogout: () => void }) {
@@ -20,6 +21,12 @@ export function Settings({ onLogout }: { onLogout: () => void }) {
   const [homeStatus, setHomeStatus] = useState('')
   const [theme, setTheme] = useState<ThemeName>('light')
   const [initialGap, setInitialGap] = useState('')
+  const [weeklyGoal, setWeeklyGoal] = useState('')
+  const [notifsEnabled, setNotifsEnabled] = useState(false)
+  const [notifStatus, setNotifStatus] = useState('')
+  const [oldPin, setOldPin] = useState('')
+  const [newPin, setNewPin] = useState('')
+  const [pinStatus, setPinStatus] = useState('')
   const [gapStatus, setGapStatus] = useState('')
   const [backupStatus, setBackupStatus] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -39,6 +46,8 @@ export function Settings({ onLogout }: { onLogout: () => void }) {
     const profile = await getProfileDoc()
     const v = profile?.initialGapMinutes ?? profile?.gapToleranceMinutes ?? 0
     setInitialGap(v ? formatSignedTime(v) : '')
+    setWeeklyGoal(profile?.weeklyHoursGoal ? String(profile.weeklyHoursGoal) : '')
+    setNotifsEnabled(Boolean(profile?.notificationsEnabled))
   }
 
   const saveGap = async () => {
@@ -47,9 +56,32 @@ export function Settings({ onLogout }: { onLogout: () => void }) {
       setGapStatus('Format invalide — ex. +5h30, -1:15 ou 90')
       return
     }
-    await saveProfileDoc({ initialGapMinutes: parsed })
+    const goal = weeklyGoal.trim() === '' ? 0 : Number(weeklyGoal)
+    if (Number.isNaN(goal) || goal < 0) {
+      setGapStatus('Objectif invalide — ex. 35')
+      return
+    }
+    await saveProfileDoc({ initialGapMinutes: parsed, weeklyHoursGoal: goal || undefined })
     setGapStatus('Enregistré')
     setTimeout(() => setGapStatus(''), 2000)
+  }
+
+  const toggleNotifs = async () => {
+    if (!notifsEnabled) {
+      const granted = await enableNotifications()
+      if (!granted) {
+        setNotifStatus('Notifications refusées par le navigateur')
+        return
+      }
+      await saveProfileDoc({ notificationsEnabled: true })
+      setNotifsEnabled(true)
+      setNotifStatus('Rappels activés')
+    } else {
+      await saveProfileDoc({ notificationsEnabled: false })
+      setNotifsEnabled(false)
+      setNotifStatus('Rappels désactivés')
+    }
+    setTimeout(() => setNotifStatus(''), 2000)
   }
 
   const loadHome = async () => {
@@ -220,14 +252,80 @@ export function Settings({ onLogout }: { onLogout: () => void }) {
           onChange={(e) => setInitialGap(e.target.value)}
           placeholder="+5h30, -1:15 ou 90"
         />
+
+        <label style={{ marginTop: '0.75rem' }}>Objectif hebdomadaire (heures)</label>
+        <input
+          type="number"
+          min="0"
+          step="0.5"
+          value={weeklyGoal}
+          onChange={(e) => setWeeklyGoal(e.target.value)}
+          placeholder="35"
+        />
+
         <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-          {gapStatus || 'Ajouté au total des écarts — ex. +5h30 si tu avais 5h30 d\'avance'}
+          {gapStatus || 'Solde initial + objectif pour la jauge du Tableau'}
         </p>
         <div className="btn-row" style={{ marginTop: '1rem' }}>
           <button className="btn-primary" onClick={saveGap}>
             Enregistrer
           </button>
         </div>
+      </section>
+
+      <section className="card">
+        <h2 className="card-title">Rappels de pointage</h2>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+          {notifStatus ||
+            'Notification à l\'heure prévue d\'arrivée et de départ (appli ouverte ou installée en PWA)'}
+        </p>
+        <button
+          className={notifsEnabled ? 'btn-secondary' : 'btn-primary'}
+          onClick={toggleNotifs}
+          style={{ marginTop: '0.75rem' }}
+        >
+          {notifsEnabled ? 'Désactiver les rappels' : 'Activer les rappels'}
+        </button>
+      </section>
+
+      <section className="card">
+        <h2 className="card-title">Changer le PIN</h2>
+        <label>Ancien PIN</label>
+        <input
+          type="password"
+          inputMode="numeric"
+          value={oldPin}
+          onChange={(e) => setOldPin(e.target.value)}
+        />
+        <label>Nouveau PIN</label>
+        <input
+          type="password"
+          inputMode="numeric"
+          value={newPin}
+          onChange={(e) => setNewPin(e.target.value)}
+        />
+        {pinStatus && (
+          <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+            {pinStatus}
+          </p>
+        )}
+        <button
+          className="btn-secondary"
+          style={{ marginTop: '0.75rem' }}
+          onClick={async () => {
+            try {
+              await changePin(oldPin, newPin)
+              setPinStatus('PIN modifié')
+              setOldPin('')
+              setNewPin('')
+            } catch (e: any) {
+              setPinStatus(e.message || 'Erreur')
+            }
+            setTimeout(() => setPinStatus(''), 3000)
+          }}
+        >
+          Modifier
+        </button>
       </section>
 
       <section className="card">

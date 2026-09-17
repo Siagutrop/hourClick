@@ -57,8 +57,8 @@ export function DayForm() {
       setActualEnd(doc.actualEnd || '')
       setBreakMinutes(doc.breakMinutes || 0)
       setLunchMinutes(doc.lunchMinutes || 0)
-      setActualBreakMinutes(doc.actualBreakMinutes || doc.breakMinutes || 0)
-      setActualLunchMinutes(doc.actualLunchMinutes || doc.lunchMinutes || 0)
+      setActualBreakMinutes(doc.actualBreakMinutes ?? doc.breakMinutes ?? 0)
+      setActualLunchMinutes(doc.actualLunchMinutes ?? doc.lunchMinutes ?? 0)
       setNotes(doc.notes || '')
     } else {
       setExpectedStart('')
@@ -184,8 +184,8 @@ export function DayForm() {
       lunchMinutes: planned?.lunchMinutes,
       actualStart: (overrides?.actualStart as string) || actualStart || undefined,
       actualEnd: (overrides?.actualEnd as string) || actualEnd || undefined,
-      actualBreakMinutes: actualBreakMinutes || undefined,
-      actualLunchMinutes: actualLunchMinutes || undefined,
+      actualBreakMinutes,
+      actualLunchMinutes,
       notes: notes || undefined,
     }
 

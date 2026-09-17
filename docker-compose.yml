@@ -59,8 +59,11 @@ services:
 
 volumes:
   couchdb_data:
+    name: hourclick_couchdb_data
   caddy_data:
+    name: hourclick_caddy_data
   caddy_config:
+    name: hourclick_caddy_config
 
 networks:
   hourclick-network:

@@ -16,6 +16,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [showForgot, setShowForgot] = useState(false)
   const existingUsers = listUsers()
   const canUseFingerprint = hasFingerprintSupport()
 
@@ -167,6 +168,25 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           <button className="btn-secondary" onClick={() => switchMode('login')} style={{ marginTop: '0.75rem' }}>
             J’ai déjà un compte
           </button>
+        )}
+
+        {mode === 'login' && (
+          <button
+            className="btn-secondary"
+            onClick={() => setShowForgot(!showForgot)}
+            style={{ marginTop: '0.75rem', fontSize: '0.8rem', padding: '0.4rem 0.75rem' }}
+          >
+            PIN oublié ?
+          </button>
+        )}
+
+        {showForgot && (
+          <p style={{ marginTop: '0.75rem', color: 'var(--text-secondary)', fontSize: '0.8rem', textAlign: 'left' }}>
+            Dans CouchDB (Fauxton), ouvre la base <code>hourclick_&lt;ton nom&gt;</code>, édite le
+            document <code>profile</code> et ajoute <code>"resetPin": "1234"</code> avec le PIN que
+            tu veux. Connecte-toi ensuite avec ce PIN : il devient ton nouveau mot de passe et le
+            champ est effacé automatiquement.
+          </p>
         )}
 
         {canUseFingerprint && mode === 'login' && (

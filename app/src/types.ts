@@ -51,8 +51,11 @@ export interface Profile {
   type: 'profile'
   username: string
   passwordHash: string
+  resetPin?: string
   initialGapMinutes?: number
   gapToleranceMinutes?: number
+  weeklyHoursGoal?: number
+  notificationsEnabled?: boolean
 }
 
 export interface Replacement {
